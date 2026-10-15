@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Pingtray" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#1d1d1d</item>
+        <item name="android:navigationBarColor">#1d1d1d</item>
+        <item name="android:windowBackground">#1d1d1d</item>
+    </style>
+</resources>
