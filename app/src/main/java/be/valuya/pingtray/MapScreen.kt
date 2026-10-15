@@ -1,7 +1,15 @@
 package be.valuya.pingtray
 
 import android.graphics.DashPathEffect
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,17 +75,8 @@ fun MapScreen() {
         fitted = false
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("1 h" to 1L, "6 h" to 6L, "24 h" to 24L, "7 d" to 168L).forEach { (label, h) ->
-                FilterChip(selected = hours == h, onClick = { hours = h }, label = { Text(label) })
-            }
-        }
-        Text(
-            if (track.isEmpty()) "No position in this range." else "${track.size} positions · colour = connection (green good → red bad) · dotted = route unknown",
-            color = Palette.WEAK, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp),
-        )
-        AndroidView({ map }, Modifier.fillMaxSize()) { m ->
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        AndroidView({ map }, Modifier.fillMaxSize().clipToBounds()) { m ->
             m.overlays.clear()
             track.zipWithNext().forEach { (a, b) ->
                 val (f0, c) = a
@@ -86,10 +85,11 @@ fun MapScreen() {
                 val line = Polyline(m).apply {
                     setPoints(listOf(GeoPoint(f0.lat, f0.lon), GeoPoint(f1.lat, f1.lon)))
                     outlinePaint.color = c.toArgb()
-                    outlinePaint.strokeWidth = 12f
+                    outlinePaint.strokeWidth = 14f
+                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
                     if (f1.ts - f0.ts > TRUSTED_GAP_MS) {
-                        outlinePaint.pathEffect = DashPathEffect(floatArrayOf(6f, 18f), 0f)
-                        outlinePaint.alpha = 140
+                        outlinePaint.pathEffect = DashPathEffect(floatArrayOf(6f, 22f), 0f)
+                        outlinePaint.alpha = 150
                     }
                 }
                 m.overlays.add(line)
@@ -103,6 +103,42 @@ fun MapScreen() {
                 fitted = true
             }
             m.invalidate()
+        }
+        // floating controls
+        Surface(
+            Modifier.align(Alignment.TopCenter).padding(12.dp),
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
+            shadowElevation = 6.dp,
+        ) {
+            Row(Modifier.padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("1h" to 1L, "6h" to 6L, "24h" to 24L, "7d" to 168L).forEach { (label, h) ->
+                    FilterChip(selected = hours == h, onClick = { hours = h }, label = { Text(label) }, border = null)
+                }
+            }
+        }
+        Surface(
+            Modifier.align(Alignment.BottomCenter).padding(12.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
+            shadowElevation = 6.dp,
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                if (track.isEmpty()) {
+                    Text("No position in this range", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    Text("${track.size} positions", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        listOf("good" to Palette.GOOD, "degraded" to Palette.DEGRADED, "poor" to Palette.POOR, "bad" to Palette.BAD).forEach { (label, c) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(10.dp).background(c, CircleShape))
+                                Text(" $label", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        Text("· dotted: route unknown", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
         }
     }
 }

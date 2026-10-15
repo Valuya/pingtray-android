@@ -2,6 +2,22 @@ package be.valuya.pingtray
 
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -64,13 +80,13 @@ class GraphData(
     val phases: Map<String, List<Pair<Long, Phases>>>,
 )
 
-private val SPANS = listOf("5 min" to 300L, "15 min" to 900L, "1 h" to 3600L, "6 h" to 21600L, "24 h" to 86400L, "7 d" to 604800L)
+private val SPANS = listOf("5m" to 300L, "15m" to 900L, "1h" to 3600L, "6h" to 21600L, "24h" to 86400L, "7d" to 604800L)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GraphScreen() {
     val context = LocalContext.current
     val settings = context.app.settings
-    val db = context.app.db
     var spanSecs by remember { mutableLongStateOf(900L) }
     var end by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var live by remember { mutableStateOf(true) }
@@ -88,64 +104,176 @@ fun GraphScreen() {
             delay(3_000)
         }
     }
+    fun select(key: String) {
+        reference = key
+        settings.reference = key
+    }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SPANS.forEach { (label, secs) ->
-                FilterChip(selected = live && spanSecs == secs, onClick = { spanSecs = secs; live = true; inspect = null }, label = { Text(label) })
-            }
-            FilterChip(selected = live, onClick = { live = !live }, label = { Text("Live") })
-        }
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val d = data
-        if (d == null) {
-            Text("Loading…", Modifier.padding(16.dp), color = Palette.WEAK)
-            return@Column
+        val ref = d?.series?.let { all -> all.firstOrNull { it.key == reference } ?: all.firstOrNull { !it.http } ?: all.firstOrNull() }
+        NowCard(d, ref, live, settings) { live = true; inspect = null }
+        if (d != null) DestinationRow(d, ref, end - spanSecs * 1000, end) { select(it.key) }
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SPANS.forEachIndexed { i, (label, secs) ->
+                SegmentedButton(
+                    selected = spanSecs == secs,
+                    onClick = { spanSecs = secs; live = true; inspect = null },
+                    shape = SegmentedButtonDefaults.itemShape(i, SPANS.size),
+                    icon = {},
+                    label = { Text(label, maxLines = 1, fontSize = 12.sp) },
+                )
+            }
         }
-        val ref = d.series.firstOrNull { it.key == reference } ?: d.series.firstOrNull { !it.http } ?: d.series.firstOrNull()
-        Header(d, ref, end - spanSecs * 1000, end)
-        Box(Modifier.fillMaxSize().padding(4.dp)) {
-            var layout by remember { mutableStateOf<Layout?>(null) }
-            Canvas(
-                Modifier.fillMaxSize()
-                    .pointerInput(spanSecs) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            val l = layout ?: return@detectTransformGestures
-                            if (zoom != 1f) spanSecs = (spanSecs / zoom).toLong().coerceIn(60, 30L * 86400)
-                            if (pan.x != 0f) {
-                                live = false
-                                end -= (pan.x / l.plotW * spanSecs * 1000).toLong()
+        Card(
+            Modifier.fillMaxSize().padding(bottom = 8.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        ) {
+            if (d == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                return@Card
+            }
+            Box(Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+                var layout by remember { mutableStateOf<Layout?>(null) }
+                Canvas(
+                    Modifier.fillMaxSize()
+                        .pointerInput(spanSecs) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val l = layout ?: return@detectTransformGestures
+                                if (zoom != 1f) spanSecs = (spanSecs / zoom).toLong().coerceIn(60, 30L * 86400)
+                                if (pan.x != 0f) {
+                                    live = false
+                                    end -= (pan.x / l.plotW * spanSecs * 1000).toLong()
+                                }
                             }
                         }
-                    }
-                    .pointerInput(d) {
-                        detectTapGestures { pos ->
-                            val l = layout ?: return@detectTapGestures
-                            val ts = l.ts(pos.x)
-                            inspect = ts
-                            // tapping a curve makes it the reference
-                            d.series.mapNotNull { s ->
-                                val b = s.buckets.firstOrNull { ts >= it.ts && ts < it.ts + d.bucketMs } ?: return@mapNotNull null
-                                val m = b.median ?: return@mapNotNull null
-                                s to abs(l.y(m, s.http) - pos.y)
-                            }.filter { it.second < 60f }.minByOrNull { it.second }?.let { (s, _) ->
-                                reference = s.key
-                                settings.reference = s.key
+                        .pointerInput(d) {
+                            detectTapGestures { pos ->
+                                val l = layout ?: return@detectTapGestures
+                                val ts = l.ts(pos.x)
+                                inspect = ts
+                                // tapping a curve makes it the reference
+                                d.series.mapNotNull { s ->
+                                    val b = s.buckets.firstOrNull { ts >= it.ts && ts < it.ts + d.bucketMs } ?: return@mapNotNull null
+                                    val m = b.median ?: return@mapNotNull null
+                                    s to abs(l.y(m, s.http) - pos.y)
+                                }.filter { it.second < 60f }.minByOrNull { it.second }?.let { (s, _) -> select(s.key) }
                             }
                         }
+                ) {
+                    val l = Layout(size, end - spanSecs * 1000, end, d, settings)
+                    layout = l
+                    drawChart(l, d, ref)
+                    inspect?.let { ts ->
+                        val x = l.x(ts)
+                        drawLine(Color.White.copy(alpha = 0.6f), Offset(x, l.top), Offset(x, l.bottom), 2f)
                     }
+                }
+                inspect?.let { ts -> Tooltip(d, ts, ref, Modifier.align(Alignment.TopEnd)) { inspect = null } }
+            }
+        }
+    }
+}
+
+/** The reference destination right now, in large. */
+@Composable
+private fun NowCard(d: GraphData?, ref: Series?, live: Boolean, s: Settings, onLive: () -> Unit) {
+    val last = ref?.buckets?.lastOrNull()
+    val ms = last?.median
+    val colour = when {
+        last != null && last.pcts == null -> Palette.BAD
+        ms != null && Palette.latencyLevel(ms, s.warnMs.toDouble(), s.badMs.toDouble()) > 0 -> Palette.quality(0.0, ms, s.warnMs.toDouble(), s.badMs.toDouble())
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Card(
+        Modifier.fillMaxWidth().padding(top = 8.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)),
+    ) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    (ref?.label ?: "pingtray").uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        when {
+                            last == null -> "–"
+                            ms == null -> "lost"
+                            ms < 10 -> "%.1f".format(ms)
+                            else -> "%.0f".format(ms)
+                        },
+                        style = MaterialTheme.typography.displayMedium,
+                        color = colour,
+                    )
+                    if (ms != null) Text(" ms", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                }
+                val window = ref?.buckets?.takeLast(10).orEmpty()
+                val count = window.sumOf { it.count }
+                val lost = window.sumOf { it.lost }
+                Text(
+                    buildString {
+                        append("loss %.1f %%".format(if (count == 0) 0.0 else 100.0 * lost / count))
+                        d?.series?.firstOrNull { it.http && it.target == ref?.target }?.buckets?.lastOrNull()?.median?.let {
+                            append(" · HTTP ").append(fmtMs(it))
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AssistChip(
+                onClick = onLive,
+                label = { Text(if (live) "Live" else "Back to live") },
+                leadingIcon = {
+                    Box(Modifier.size(8.dp).background(if (live) Palette.GOOD else Palette.WEAK, CircleShape))
+                },
+            )
+        }
+    }
+}
+
+/** One compact card per series; tapping picks the reference. */
+@Composable
+private fun DestinationRow(d: GraphData, ref: Series?, from: Long, to: Long, onPick: (Series) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(d.series, key = { it.key }) { s ->
+            val visible = s.buckets.filter { it.ts in from..to }
+            val meds = visible.mapNotNull { it.median }.sorted()
+            val count = visible.sumOf { it.count }
+            val lost = visible.sumOf { it.lost }
+            val selected = s === ref
+            Card(
+                onClick = { onPick(s) },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (selected) s.color.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surfaceContainer,
+                ),
+                border = if (selected) BorderStroke(1.dp, s.color) else null,
             ) {
-                val l = Layout(size, end - spanSecs * 1000, end, d, settings)
-                layout = l
-                drawChart(l, d, ref)
-                inspect?.let { ts ->
-                    val x = l.x(ts)
-                    drawLine(Color.White.copy(alpha = 0.6f), Offset(x, l.top), Offset(x, l.bottom), 1.5f)
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).background(s.color, CircleShape))
+                        Text(
+                            " ${s.target.name} · ${if (s.http) "HTTP" else "ping"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        if (meds.isEmpty()) "–" else fmtMs(percentile(meds, 0.5)),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    if (lost > 0) Text(
+                        "%s %.1f %%".format(if (s.http) "failed" else "loss", 100.0 * lost / count),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Palette.loss(lost.toDouble() / count),
+                    )
                 }
             }
-            inspect?.let { ts -> Tooltip(d, ts, ref, Modifier.align(Alignment.TopEnd)) { inspect = null } }
         }
     }
 }
@@ -187,7 +315,6 @@ private fun alphaAt(q: Double, max: Float) = max * (1 - abs(2 * q - 1)).pow(0.8)
 
 private fun DrawScope.drawChart(l: Layout, d: GraphData, ref: Series?) {
     val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 26f; color = Palette.WEAK.toArgb() }
-    drawRect(Palette.PANEL, Offset(l.left, l.top), Size(l.plotW, l.plotH))
     // value grid, both scales
     for (i in 0..4) {
         val f = i / 4.0
@@ -271,40 +398,16 @@ private fun DrawScope.drawChart(l: Layout, d: GraphData, ref: Series?) {
     }
 }
 
-@Composable
-private fun Header(d: GraphData, ref: Series?, from: Long, to: Long) {
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        for (s in d.series) {
-            val visible = s.buckets.filter { it.ts in from..to }
-            val meds = visible.mapNotNull { it.median }.sorted()
-            val count = visible.sumOf { it.count }
-            val lost = visible.sumOf { it.lost }
-            val loss = if (count == 0) 0.0 else lost.toDouble() / count
-            Text(
-                buildString {
-                    append(s.label)
-                    if (meds.isNotEmpty()) append(" ").append(fmtMs(percentile(meds, 0.5)))
-                    if (lost > 0) append(" · %.1f %%".format(loss * 100))
-                },
-                color = s.color,
-                fontSize = 13.sp,
-                fontWeight = if (s === ref) FontWeight.Bold else FontWeight.Normal,
-            )
-        }
-    }
-}
-
 /** What happened at the tapped moment: every series, where HTTP time went, where you were. */
 @Composable
 private fun Tooltip(d: GraphData, ts: Long, ref: Series?, modifier: Modifier, onClose: () -> Unit) {
     val fmt = SimpleDateFormat("EEE d/MM HH:mm:ss", Locale.getDefault())
-    Column(
-        modifier.padding(8.dp).background(Color(0xEE222226), RoundedCornerShape(8.dp)).padding(10.dp)
-            .pointerInput(Unit) { detectTapGestures { onClose() } }
-    ) {
+    Surface(
+        modifier.padding(10.dp).widthIn(max = 330.dp).pointerInput(Unit) { detectTapGestures { onClose() } },
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.96f),
+        shadowElevation = 6.dp,
+    ) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(fmt.format(Date(ts)), color = Palette.TEXT, fontWeight = FontWeight.Bold, fontSize = 13.sp)
         for (s in d.series) {
             val b = s.buckets.firstOrNull { ts >= it.ts && ts < it.ts + d.bucketMs }
@@ -333,5 +436,5 @@ private fun Tooltip(d: GraphData, ts: Long, ref: Series?, modifier: Modifier, on
         d.notes.lastOrNull { it.ts <= ts && ts - it.ts < 4 * 3_600_000 }?.let { n ->
             Text("Note: ${n.text}", color = Palette.TEXT, fontSize = 11.sp)
         }
-    }
+    } }
 }

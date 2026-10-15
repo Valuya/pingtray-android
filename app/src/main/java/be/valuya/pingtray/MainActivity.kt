@@ -7,18 +7,24 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.ShowChart
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Tab
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -36,6 +42,7 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.POST_NOTIFICATIONS,
         ))
+        enableEdgeToEdge()
         setContent { PingtrayApp() }
     }
 
@@ -55,21 +62,39 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class Screen(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Graph("Graph", Icons.Rounded.ShowChart),
+    Map("Map", Icons.Rounded.Map),
+    Notes("Notes", Icons.Rounded.EditNote),
+    Settings("Settings", Icons.Rounded.Settings),
+}
+
 @Composable
 fun PingtrayApp() {
-    MaterialTheme(colorScheme = darkColorScheme(background = Palette.BACKGROUND, surface = Palette.BACKGROUND)) {
-        var tab by rememberSaveable { mutableIntStateOf(0) }
-        Column(Modifier.fillMaxSize().background(Palette.BACKGROUND).safeDrawingPadding()) {
-            PrimaryTabRow(selectedTabIndex = tab, containerColor = Palette.BACKGROUND) {
-                listOf("Graph", "Map", "Notes", "Settings").forEachIndexed { i, label ->
-                    Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
+    PingtrayTheme {
+        var screen by rememberSaveable { mutableStateOf(Screen.Graph) }
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.surface,
+            bottomBar = {
+                NavigationBar {
+                    Screen.entries.forEach { s ->
+                        NavigationBarItem(
+                            selected = screen == s,
+                            onClick = { screen = s },
+                            icon = { Icon(s.icon, contentDescription = null) },
+                            label = { Text(s.label) },
+                        )
+                    }
                 }
-            }
-            when (tab) {
-                0 -> GraphScreen()
-                1 -> MapScreen()
-                2 -> NotesScreen()
-                else -> SettingsScreen()
+            },
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                when (screen) {
+                    Screen.Graph -> GraphScreen()
+                    Screen.Map -> MapScreen()
+                    Screen.Notes -> NotesScreen()
+                    Screen.Settings -> SettingsScreen()
+                }
             }
         }
     }
